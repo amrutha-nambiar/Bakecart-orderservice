@@ -5,7 +5,8 @@ from flask_sqlalchemy import SQLAlchemy
 import os
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://amrutha-nambiar.github.io/Bakecart-frontend/"])
+
 
 # Connect to PostgreSQL on Render
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')  # Render sets this
@@ -80,3 +81,4 @@ def delete_order(order_id):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5002)))
+
