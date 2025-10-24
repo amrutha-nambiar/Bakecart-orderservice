@@ -1,65 +1,58 @@
 # app.py
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import sqlite3
+from flask_sqlalchemy import SQLAlchemy
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-DB_FILE = "bakecart.db"
+# Connect to PostgreSQL on Render
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')  # Render sets this
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
-# Initialize database
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS orders (
-        order_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER,
-        quantity INTEGER,
-        status TEXT DEFAULT 'Pending',
-        FOREIGN KEY(product_id) REFERENCES products(id)
-    )
-    """)
-    conn.commit()
-    conn.close()
+# Models
+class Product(db.Model):
+    __tablename__ = 'products'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    price = db.Column(db.Float, nullable=False)
 
-init_db()
+class Order(db.Model):
+    __tablename__ = 'orders'
+    order_id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'))
+    quantity = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(20), default="Pending")
+    product = db.relationship('Product')
+
+# Create tables
+with app.app_context():
+    db.create_all()
 
 # GET all orders
 @app.route("/orders", methods=["GET"])
 def get_orders():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-    SELECT o.order_id, o.quantity, o.status, p.id, p.name, p.price
-    FROM orders o
-    JOIN products p ON o.product_id = p.id
-    """)
-    orders = []
-    for row in cursor.fetchall():
-        orders.append({
-            "order_id": row[0],
-            "quantity": row[1],
-            "status": row[2],
-            "product": {"id": row[3], "name": row[4], "price": row[5]}
+    orders = Order.query.all()
+    result = []
+    for o in orders:
+        result.append({
+            "order_id": o.order_id,
+            "quantity": o.quantity,
+            "status": o.status,
+            "product": {"id": o.product.id, "name": o.product.name, "price": o.product.price} if o.product else None
         })
-    conn.close()
-    return jsonify(orders)
+    return jsonify(result)
 
 # POST create order
 @app.route("/orders", methods=["POST"])
 def add_order():
     data = request.get_json()
-    product_id = data.get("product_id")
-    quantity = data.get("quantity")
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO orders (product_id, quantity) VALUES (?, ?)", (product_id, quantity))
-    conn.commit()
-    order_id = cursor.lastrowid
-    conn.close()
-    return jsonify({"order_id": order_id, "product_id": product_id, "quantity": quantity, "status": "Pending"}), 201
+    order = Order(product_id=data.get("product_id"), quantity=data.get("quantity"))
+    db.session.add(order)
+    db.session.commit()
+    return jsonify({"order_id": order.order_id, "product_id": order.product_id, "quantity": order.quantity, "status": order.status}), 201
 
 # PUT update status
 @app.route("/orders/<int:order_id>/status", methods=["PUT"])
@@ -68,22 +61,22 @@ def update_order_status(order_id):
     status = data.get("status")
     if status not in ["Pending", "Completed", "Cancelled"]:
         return jsonify({"error": "Invalid status"}), 400
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE orders SET status=? WHERE order_id=?", (status, order_id))
-    conn.commit()
-    conn.close()
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    order.status = status
+    db.session.commit()
     return jsonify({"message": "Status updated"}), 200
 
 # DELETE order
 @app.route("/orders/<int:order_id>", methods=["DELETE"])
 def delete_order(order_id):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM orders WHERE order_id=?", (order_id,))
-    conn.commit()
-    conn.close()
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    db.session.delete(order)
+    db.session.commit()
     return jsonify({"message": "Order deleted"}), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5002)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5002)))
