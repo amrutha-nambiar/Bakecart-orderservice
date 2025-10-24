@@ -6,14 +6,39 @@ app = Flask(__name__)
 CORS(app)
 
 orders = []
-PRODUCT_SERVICE_URL = "http://product_service:5001/products"
+PRODUCT_SERVICE_URL = "https://bakecart-product-service.onrender.com/products"
 
-# GET all orders
 @app.route("/orders", methods=["GET"])
 def get_orders():
     return jsonify(orders)
 
-# POST - create order
+@app.route("/orders", methods=["POST"])
+def create_order():
+    data = request.get_json()
+    product_id = data.get("product_id")
+    quantity = data.get("quantity", 1)
+
+    if not product_id or quantity <= 0:
+        return jsonify({"error": "Invalid order data"}), 400
+
+    try:
+        res = requests.get(f"{PRODUCT_SERVICE_URL}/{product_id}")
+        res.raise_for_status()
+        product = res.json()
+    except Exception:
+        return jsonify({"error": "Product not found"}), 404
+
+    order_id = len(orders) + 1
+    order = {
+        "order_id": order_id,
+        "product_id": product_id,
+        "quantity": quantity,
+        "product": product,
+        "status": "Pending"
+    }
+    orders.append(order)
+    return jsonify(order), 201
+
 @app.route("/orders/<int:order_id>/status", methods=["PUT"])
 def update_order_status(order_id):
     data = request.get_json()
@@ -27,35 +52,7 @@ def update_order_status(order_id):
 
     order["status"] = new_status
     return jsonify(order)
-@app.route("/orders", methods=["POST"])
-def create_order():
-    data = request.get_json()
-    product_id = data.get("product_id")
-    quantity = data.get("quantity", 1)
 
-    if not product_id or quantity <= 0:
-        return jsonify({"error": "Invalid order data"}), 400
-
-    # Fetch product info from product service
-    try:
-        res = requests.get(f"{PRODUCT_SERVICE_URL}/{product_id}")
-        res.raise_for_status()
-        product = res.json()
-    except Exception as e:
-        return jsonify({"error": "Product not found"}), 404
-
-    order_id = len(orders) + 1
-    order = {
-        "order_id": order_id,
-        "product_id": product_id,
-        "quantity": quantity,
-        "product": product,
-        "status": "Pending"  # default status
-    }
-    orders.append(order)
-    return jsonify(order), 201
-
-# DELETE order
 @app.route("/orders/<int:order_id>", methods=["DELETE"])
 def delete_order(order_id):
     global orders
